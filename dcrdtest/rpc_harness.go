@@ -158,7 +158,7 @@ func New(t *testing.T, activeNet *chaincfg.Params, handlers *rpcclient.Notificat
 	// config.debugLevel = "TXMP=trace,TRSY=trace,RPCS=trace,PEER=trace"
 
 	// Create the testing node bounded to the simnet.
-	node, err := newNode(config, nodeTestData)
+	node, err := newNode(config, nodeTestData, nodeNum)
 	if err != nil {
 		return nil, err
 	}

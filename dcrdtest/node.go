@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"sync"
 	"time"
 
@@ -175,14 +174,13 @@ func (n *nodeConfig) String() string {
 // node houses the necessary state required to configure, launch, and manage a
 // dcrd process.
 type node struct {
-	config *nodeConfig
+	config  *nodeConfig
+	nodeNum uint32
 
-	cmd     *exec.Cmd
-	pidFile string
-	stderr  io.ReadCloser
-	stdout  io.ReadCloser
-	wg      sync.WaitGroup
-	pid     int
+	cmd    *exec.Cmd
+	stderr io.ReadCloser
+	stdout io.ReadCloser
+	wg     sync.WaitGroup
 
 	// Locally bound addresses for the subsystems.
 	p2pAddr string
@@ -193,30 +191,28 @@ type node struct {
 
 // logf is identical to n.t.Logf but it prepends the pid of this  node.
 func (n *node) logf(format string, args ...interface{}) {
-	pid := strconv.Itoa(n.pid) + " "
-	log.Debugf(pid+format, args...)
+	id := fmt.Sprintf("%03d ", n.nodeNum)
+	log.Debugf(id+format, args...)
 }
 
 // newNode creates a new node instance according to the passed config. dataDir
 // will be used to hold a file recording the pid of the launched process, and
 // as the base for the log and data directories for dcrd.
-func newNode(config *nodeConfig, dataDir string) (*node, error) {
+func newNode(config *nodeConfig, dataDir string, nodeNum uint32) (*node, error) {
 	return &node{
 		config:  config,
 		dataDir: dataDir,
+		nodeNum: nodeNum,
 	}, nil
 }
 
-// start creates a new dcrd process, and writes its pid in a file reserved for
-// recording the pid of the launched process. This file can be used to
-// terminate the process in case of a hang, or panic. In the case of a failing
-// test case, or panic, it is important that the process be stopped via stop(),
-// otherwise, it will persist unless explicitly killed.
+// start creates a new dcrd process. In the case of a failing test case, or
+// panic, it is important that the process be stopped via stop(), otherwise, it
+// will persist unless explicitly killed.
 func (n *node) start(ctx context.Context) error {
 	var err error
 
-	var pid sync.WaitGroup
-	pid.Add(1)
+	running := make(chan struct{})
 
 	cmd := n.config.command()
 
@@ -228,7 +224,12 @@ func (n *node) start(ctx context.Context) error {
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
-		pid.Wait() // Block until pid is available
+		select {
+		case <-running:
+		case <-ctx.Done():
+			return
+		}
+		n.logf("Reading stderr")
 		r := bufio.NewReader(n.stderr)
 		for {
 			line, err := r.ReadBytes('\n')
@@ -251,7 +252,12 @@ func (n *node) start(ctx context.Context) error {
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
-		pid.Wait() // Block until pid is available
+		select {
+		case <-running:
+		case <-ctx.Done():
+			return
+		}
+		n.logf("Reading stdout")
 		r := bufio.NewReader(n.stdout)
 		for {
 			line, err := r.ReadBytes('\n')
@@ -262,7 +268,7 @@ func (n *node) start(ctx context.Context) error {
 				n.logf("stdout: Unable to read stdout: %v", err)
 				return
 			}
-			log.Tracef("stdout: %s", line)
+			n.logf("stdout: %s", line)
 		}
 	}()
 
@@ -270,6 +276,7 @@ func (n *node) start(ctx context.Context) error {
 	gotSubsysAddrs := make(chan struct{})
 	var p2pAddr, rpcAddr string
 	go func() {
+		n.logf("Reading IPC messages.")
 		for {
 			msg, err := nextIPCMessage(n.config.pipeTX.r)
 			if err != nil {
@@ -298,43 +305,27 @@ func (n *node) start(ctx context.Context) error {
 		n.logf("IPC messages drained")
 	}()
 
-	// Launch command and store pid.
-	if err := cmd.Start(); err != nil {
+	// Launch command and signal that it is running.
+	err = cmd.Start()
+	close(running)
+	if err != nil {
 		// When failing to execute, wait until running goroutines are
 		// closed.
-		pid.Done()
 		n.wg.Wait()
 		n.config.pipeTX.close()
 		n.config.pipeRX.close()
 		return fmt.Errorf("%w: %v", errDcrdCmdExec, err)
 	}
 	n.cmd = cmd
-	n.pid = n.cmd.Process.Pid
-
-	// Unblock pipes now that pid is available.
-	pid.Done()
-
-	f, err := os.Create(filepath.Join(n.config.String(), "dcrd.pid"))
-	if err != nil {
-		_ = n.stop() // Cleanup what has been done so far.
-		return err
-	}
-
-	n.pidFile = f.Name()
-	if _, err = fmt.Fprintf(f, "%d\n", n.cmd.Process.Pid); err != nil {
-		_ = n.stop() // Cleanup what has been done so far.
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = n.stop() // Cleanup what has been done so far.
-		return err
-	}
 
 	// Read the RPC and P2P addresses.
 	select {
 	case <-ctx.Done():
-		_ = n.stop() // Cleanup what has been done so far.
-		return ctx.Err()
+		closeErr := n.stop() // Cleanup what has been done so far.
+		if closeErr != nil && !errors.Is(err, context.Canceled) {
+			n.logf("Error sttoping after context was canceled: %v", err)
+		}
+		return fmt.Errorf("context done while waiting for addrs: %v", ctx.Err())
 	case <-gotSubsysAddrs:
 		n.p2pAddr = p2pAddr
 		n.rpcAddr = rpcAddr
@@ -396,24 +387,6 @@ func (n *node) stop() error {
 	return nil
 }
 
-// cleanup cleanups process and args files. The file housing the pid of the
-// created process will be deleted, as well as any directories created by the
-// process.
-func (n *node) cleanup() error {
-	log.Tracef("cleanup")
-	defer log.Tracef("cleanup done")
-
-	if n.pidFile != "" {
-		if err := os.Remove(n.pidFile); err != nil {
-			log.Debugf("unable to remove file %s: %v", n.pidFile,
-				err)
-			return err
-		}
-	}
-
-	return nil
-}
-
 // shutdown terminates the running dcrd process, and cleans up all
 // file/directories created by node.
 func (n *node) shutdown() error {
@@ -424,7 +397,7 @@ func (n *node) shutdown() error {
 		log.Debugf("shutdown stop error: %v", err)
 		return err
 	}
-	return n.cleanup()
+	return nil
 }
 
 // rpcConnConfig returns the rpc connection config that can be used to connect
