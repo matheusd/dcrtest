@@ -192,7 +192,7 @@ type node struct {
 // logf is identical to n.t.Logf but it prepends the pid of this  node.
 func (n *node) logf(format string, args ...interface{}) {
 	id := fmt.Sprintf("%03d ", n.nodeNum)
-	log.Debugf(id+format, args...)
+ log().Debugf(id+format, args...)
 }
 
 // newNode creates a new node instance according to the passed config. dataDir
@@ -338,8 +338,8 @@ func (n *node) start(ctx context.Context) error {
 // properly. On windows, interrupt is not supported, so a kill signal is used
 // instead
 func (n *node) stop() error {
-	log.Tracef("stop %p", n.cmd)
-	defer log.Tracef("stop done")
+ log().Tracef("stop %p", n.cmd)
+	defer log().Tracef("stop done")
 
 	if n.cmd == nil || n.cmd.Process == nil {
 		// return if not properly initialized
@@ -354,7 +354,7 @@ func (n *node) stop() error {
 
 		// Make a harder attempt at shutdown, by sending an interrupt
 		// signal.
-		log.Tracef("stop send kill")
+	 log().Tracef("stop send kill")
 		var err error
 		if runtime.GOOS == "windows" {
 			err = n.cmd.Process.Signal(os.Kill)
@@ -362,19 +362,19 @@ func (n *node) stop() error {
 			err = n.cmd.Process.Signal(os.Interrupt)
 		}
 		if err != nil {
-			log.Debugf("stop Signal error: %v", err)
+		 log().Debugf("stop Signal error: %v", err)
 		}
 	}
 
 	// Wait for pipes.
-	log.Tracef("stop wg")
+ log().Tracef("stop wg")
 	n.wg.Wait()
 
 	// Wait for command to exit.
-	log.Tracef("stop cmd.Wait")
+ log().Tracef("stop cmd.Wait")
 	err = n.cmd.Wait()
 	if err != nil {
-		log.Debugf("stop cmd.Wait error: %v", err)
+	 log().Debugf("stop cmd.Wait error: %v", err)
 	}
 
 	// Close the IPC pipes.
@@ -390,11 +390,11 @@ func (n *node) stop() error {
 // shutdown terminates the running dcrd process, and cleans up all
 // file/directories created by node.
 func (n *node) shutdown() error {
-	log.Tracef("shutdown")
-	defer log.Tracef("shutdown done")
+ log().Tracef("shutdown")
+	defer log().Tracef("shutdown done")
 
 	if err := n.stop(); err != nil {
-		log.Debugf("shutdown stop error: %v", err)
+	 log().Debugf("shutdown stop error: %v", err)
 		return err
 	}
 	return nil

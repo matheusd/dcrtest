@@ -3,15 +3,29 @@
 // license that can be found in the LICENSE file.
 package dcrdtest
 
-import "github.com/decred/slog"
+import (
+	"sync"
+
+	"github.com/decred/slog"
+)
+
+func log() slog.Logger {
+	mtx.Lock()
+	res := innerLog
+	mtx.Unlock()
+	return res
+}
 
 // log is a logger that is initialized with no output filters.  This
 // means the package will not perform any logging by default until the caller
 // requests it.
 // The default amount of logging is none.
-var log = slog.Disabled
+var innerLog = slog.Disabled
+var mtx sync.Mutex
 
 // UseLogger uses a specified Logger to output package logging info.
 func UseLogger(logger slog.Logger) {
-	log = logger
+	mtx.Lock()
+	innerLog = logger
+	mtx.Unlock()
 }

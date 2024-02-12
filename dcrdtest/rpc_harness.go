@@ -120,7 +120,7 @@ func New(t *testing.T, activeNet *chaincfg.Params, handlers *rpcclient.Notificat
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("temp dir: %v\n", nodeTestData)
+ log().Debugf("temp dir: %v\n", nodeTestData)
 
 	certFile := filepath.Join(nodeTestData, "rpc.cert")
 	keyFile := filepath.Join(nodeTestData, "rpc.key")
@@ -223,7 +223,7 @@ func (h *Harness) SetUp(ctx context.Context, createTestChain bool, numMatureOutp
 	defer func() {
 		if err != nil {
 			tearErr := h.TearDown()
-			log.Warnf("Teardown error after setup error %v: %v", err, tearErr)
+		 log().Warnf("Teardown error after setup error %v: %v", err, tearErr)
 		}
 	}()
 
@@ -253,7 +253,7 @@ func (h *Harness) SetUp(ctx context.Context, createTestChain bool, numMatureOutp
 		return err
 	}
 
-	log.Tracef("createTestChain %v numMatureOutputs %v", createTestChain,
+ log().Tracef("createTestChain %v numMatureOutputs %v", createTestChain,
 		numMatureOutputs)
 	// Create a test chain with the desired number of mature coinbase
 	// outputs.
@@ -261,7 +261,7 @@ func (h *Harness) SetUp(ctx context.Context, createTestChain bool, numMatureOutp
 		// Include an extra block to account for the premine block.
 		numToGenerate := (uint32(h.ActiveNet.CoinbaseMaturity) +
 			numMatureOutputs) + 1
-		log.Tracef("Generate: %v", numToGenerate)
+	 log().Tracef("Generate: %v", numToGenerate)
 		_, err := h.Node.Generate(ctx, numToGenerate)
 		if err != nil {
 			return err
@@ -274,7 +274,7 @@ func (h *Harness) SetUp(ctx context.Context, createTestChain bool, numMatureOutp
 	if err != nil {
 		return err
 	}
-	log.Tracef("Best block height: %v", height)
+ log().Tracef("Best block height: %v", height)
 	ticker := time.NewTicker(time.Millisecond * 100)
 	for range ticker.C {
 		walletHeight := h.wallet.SyncedHeight()
@@ -282,7 +282,7 @@ func (h *Harness) SetUp(ctx context.Context, createTestChain bool, numMatureOutp
 			break
 		}
 	}
-	log.Tracef("Synced: %v", height)
+ log().Tracef("Synced: %v", height)
 
 	return nil
 }
@@ -293,17 +293,17 @@ func (h *Harness) SetUp(ctx context.Context, createTestChain bool, numMatureOutp
 // NOTE: This method and SetUp should always be called from the same goroutine
 // as they are not concurrent safe.
 func (h *Harness) TearDown() error {
-	log.Debugf("TearDown %p %p", h.Node, h.node)
-	defer log.Debugf("TearDown done")
+ log().Debugf("TearDown %p %p", h.Node, h.node)
+	defer log().Debugf("TearDown done")
 
 	if h.Node != nil {
-		log.Debugf("TearDown: Node")
+	 log().Debugf("TearDown: Node")
 		h.Node.Shutdown()
 		h.Node = nil
 	}
 
 	if h.node != nil {
-		log.Debugf("TearDown: node")
+	 log().Debugf("TearDown: node")
 		node := h.node
 		h.node = nil
 		if err := node.shutdown(); err != nil {
@@ -311,7 +311,7 @@ func (h *Harness) TearDown() error {
 		}
 	}
 
-	log.Debugf("TearDown: wallet")
+ log().Debugf("TearDown: wallet")
 	if h.wallet != nil {
 		h.wallet.Stop()
 		h.wallet = nil
@@ -319,9 +319,9 @@ func (h *Harness) TearDown() error {
 
 	if !h.keepNodeDir {
 		if err := os.RemoveAll(h.testNodeDir); err != nil {
-			log.Warnf("Unable to remove test node dir %s: %v", h.testNodeDir, err)
+		 log().Warnf("Unable to remove test node dir %s: %v", h.testNodeDir, err)
 		} else {
-			log.Debugf("Removed test node dir %s", h.testNodeDir)
+		 log().Debugf("Removed test node dir %s", h.testNodeDir)
 		}
 	}
 
